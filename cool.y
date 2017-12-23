@@ -190,8 +190,28 @@
     ;
     
     /* Feature list may be empty, but no empty features in list. */
-    dummy_feature_list:		/* empty */
-    {  $$ = nil_Features(); }
+feature_list : /* empty */
+        { $$ = nil_Features(); }
+        | feature
+        { $$ = single_Features($1); }
+        | feature_list feature
+        { $$ = append_Features($1, single_Features($2));}
+        ;
+
+feature  :  method
+        { $$ =  $1;}
+        | attr
+        { $$ =  $1;}
+        | error ';'
+        ;
+
+method : OBJECTID '(' optional_formal_list')' ':' TYPEID '{' expression '}' ';'
+         { $$ = method($1, $3, $6, $8); }
+         ;
+
+attr : OBJECTID ':' TYPEID optional_assign ';'
+         { $$ = attr($1, $3, $4);}
+         ;
     
     
     /* end of grammar */
