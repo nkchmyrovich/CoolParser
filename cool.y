@@ -137,34 +137,32 @@
     /* You will want to change the following line. */
     %type <features> feature_list
     %type <feature> feature
-    %type <feature> method
-    %type <feature> attr
 
-    %type <expression> expression
-    %type <expression> optional_assign
-    %type <expression> lets
-    %type <expressions> expression_list
-    %type <expressions> multi_expression    
-
-    %type <formal> formal
     %type <formals> formal_list
-    %type <formals> optional_formal_list
+    %type <formal> formal
 
-    %type <case_> case
     %type <cases> case_list
+    %type <case_> case
 
-    /* Precedence declarations go here. */
+    %type <expression> let
+
+    %type <expressions> multi_expression_list
+    %type <expressions> expression_list
+    %type <expression> expression
     
+    /* Precedence declarations go here. */
+
+    %right LET IN
     %right ASSIGN
     %left NOT
-    %nonassoc '<' '=' LE
-    %left '+' '-'
+    %nonassoc LE '<' '='
+    %left '-' '+'
     %left '*' '/'
     %left ISVOID
     %left '~'
     %left '@'
     %left '.'
-
+    
     %%
     /* 
     Save the root of the abstract syntax tree in a global variable.
@@ -179,39 +177,161 @@
     | class_list class	/* several classes */
     { $$ = append_Classes($1,single_Classes($2)); 
     parse_results = $$; }
+    | class_list error
+    {}
+    | error
+    {}
     ;
     
     /* If no parent is specified, the class inherits from the Object class. */
-    class	: CLASS TYPEID '{' dummy_feature_list '}' ';'
+    class	: CLASS TYPEID '{' feature_list '}' ';'
     { $$ = class_($2,idtable.add_string("Object"),$4,
     stringtable.add_string(curr_filename)); }
-    | CLASS TYPEID INHERITS TYPEID '{' dummy_feature_list '}' ';'
+    | CLASS TYPEID '{' '}' ';'
+    { $$ = class_($2,idtable.add_string("Object"),nil_Features(),
+    stringtable.add_string(curr_filename)); }
+    | CLASS TYPEID INHERITS TYPEID '{' feature_list '}' ';'
     { $$ = class_($2,$4,$6,stringtable.add_string(curr_filename)); }
+    | CLASS TYPEID INHERITS TYPEID '{' '}' ';'
+    { $$ = class_($2,$4,nil_Features(),stringtable.add_string(curr_filename)); }
     ;
     
     /* Feature list may be empty, but no empty features in list. */
-feature_list : /* empty */
-        { $$ = nil_Features(); }
-        | feature
-        { $$ = single_Features($1); }
-        | feature_list feature
-        { $$ = append_Features($1, single_Features($2));}
-        ;
+    feature_list
+    : feature ';'
+    { $$ = single_Features($1); }
+    | feature_list feature ';'
+    { $$ = append_Features($1, single_Features($2)); }
+    | feature_list error ';'
+    {}
+    | error ';'
+    {}
+    ;
 
-feature  :  method
-        { $$ =  $1;}
-        | attr
-        { $$ =  $1;}
-        | error ';'
-        ;
+    feature
+    : OBJECTID '(' ')' ':' TYPEID '{' expression '}'
+    { $$ = method($1, nil_Formals(), $5, $7); }
+    | OBJECTID '(' formal_list ')' ':' TYPEID '{' expression '}'
+    { $$ = method($1, $3, $6, $8); }
+    | OBJECTID ':' TYPEID ASSIGN expression
+    { $$ = attr($1, $3, $5); }
+    | OBJECTID ':' TYPEID
+    { $$ = attr($1, $3, no_expr()); }
+    ;
 
-method : OBJECTID '(' optional_formal_list')' ':' TYPEID '{' expression '}' ';'
-         { $$ = method($1, $3, $6, $8); }
-         ;
+    formal_list
+    : formal
+    { $$ = single_Formals($1); }
+    | formal_list ',' formal
+    { $$ = append_Formals($1, single_Formals($3)); }
+    ;
 
-attr : OBJECTID ':' TYPEID optional_assign ';'
-         { $$ = attr($1, $3, $4);}
-         ;
+    formal
+    : OBJECTID ':' TYPEID
+    { $$ = formal($1, $3); }
+    ;
+
+    expression_list
+    : expression
+    { $$ = single_Expressions($1); }
+    | expression_list ',' expression
+    { $$ = append_Expressions($1, single_Expressions($3)); }
+    ;
+
+    multi_expression_list
+    : expression ';'
+    { $$ = single_Expressions($1); }
+    | multi_expression_list expression ';'
+    { $$ = append_Expressions($1, single_Expressions($2)); }
+    | multi_expression_list error ';'
+    {}
+    | error ';'
+    {}
+    ;
+
+    case
+    : OBJECTID ':' TYPEID DARROW expression ';'
+    { $$ = branch($1, $3, $5); }
+    ;
+
+    case_list
+    : case
+    { $$ = single_Cases($1); }
+    | case_list case
+    { $$ = append_Cases($1, single_Cases($2)); }
+    ;
+
+    let
+    : OBJECTID ':' TYPEID IN expression
+    { $$ = let($1, $3, no_expr(), $5); }
+    | OBJECTID ':' TYPEID ASSIGN expression IN expression
+    { $$ = let($1, $3, $5, $7); }
+    | OBJECTID ':' TYPEID ',' let
+    { $$ = let($1, $3, no_expr(), $5); }
+    | OBJECTID ':' TYPEID ASSIGN expression ',' let
+    { $$ = let($1, $3, $5, $7); }
+    | error let
+    { }
+    ;
+
+    expression
+    : OBJECTID ASSIGN expression
+    { $$ = assign($1, $3); }
+    | expression '@' TYPEID '.' OBJECTID '(' ')'
+    { $$ = static_dispatch($1, $3, $5, nil_Expressions()); }
+    | expression '@' TYPEID '.' OBJECTID '(' expression_list ')'
+    { $$ = static_dispatch($1, $3, $5, $7); }
+    | expression '.' OBJECTID '(' ')'
+    { $$ = dispatch($1, $3, nil_Expressions()); }
+    | expression '.' OBJECTID '(' expression_list ')'
+    { $$ = dispatch($1, $3, $5); }
+    | OBJECTID '(' ')'
+    { $$ = dispatch(object(idtable.add_string("Self")), $1, nil_Expressions()); }
+    | OBJECTID '(' expression_list ')'
+    { $$ = dispatch(object(idtable.add_string("Self")), $1, $3); }
+    | IF expression THEN expression ELSE expression FI
+    { $$ = cond($2, $4, $6); }
+    | WHILE expression LOOP expression POOL
+    { $$ = loop($2, $4); }
+    | '{' multi_expression_list '}'
+    { $$ = block($2); }
+    | LET let
+    { $$ = $2; }
+    | CASE expression OF case_list ESAC
+    { $$ = typcase($2, $4); }
+    | NEW TYPEID
+    { $$ = new_($2); }
+    | ISVOID expression
+    { $$ = isvoid($2); }
+    | expression '+' expression
+    { $$ = plus($1, $3); }
+    | expression '-' expression
+    { $$ = sub($1, $3); }
+    | expression '*' expression
+    { $$ = mul($1, $3); }
+    | expression '/' expression
+    { $$ = divide($1, $3); }
+    | '~' expression
+    { $$ = neg($2); }
+    | expression '<' expression
+    { $$ = lt($1, $3); }
+    | expression LE expression
+    { $$ = leq($1, $3); }
+    | expression '=' expression
+    { $$ = eq($1, $3); }
+    | NOT expression
+    { $$ = comp($2); }
+    | '(' expression ')'
+    { $$ = $2; }
+    | OBJECTID
+    { $$ = object($1); }
+    | INT_CONST
+    { $$ = int_const($1); }
+    | STR_CONST
+    { $$ = string_const($1); }
+    | BOOL_CONST
+    { $$ = bool_const($1); }
+    ;
     
     
     /* end of grammar */
